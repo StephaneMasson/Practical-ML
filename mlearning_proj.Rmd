@@ -1,0 +1,142 @@
+---
+title: "Practical Machine Learning - Project Submission"
+author: "Stephane MASSON"
+date: "Sunday, October 25, 2015"
+output: html_document
+---
+
+#Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har. The goal of this project is to predict the manner in which they did the execise.
+
+The dataset used in this project can be found here, and the experiment details are described in the original paper.
+
+#Data
+
+First of all, by executing the following step, we want to ensure that the data are available and loaded in R environment. 
+
+```{r, echo = FALSE}
+library(caret);library(kernlab)
+```
+```{r, echo = TRUE}
+trainset_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testset_url <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+if(!file.exists("./mlearn_project")) {dir.create("./mlearn_project")}
+
+download.file(trainset_url, "mlearn_project/pml-training.csv", method = "curl")
+download.file(testset_url, "mlearn_project/pml-testing.csv", method = "curl")
+
+train <- read.csv("C:/Users/DATANALYSIS/Documents/RProgramming/mlearn_project/pml-training.csv",na.strings=c("","NA","#DIV/0!"))
+test <- read.csv("C:/Users/DATANALYSIS/Documents/RProgramming/mlearn_project/pml-testing.csv",na.strings=c("","NA","#DIV/0!"))
+```
+
+#Data exploration
+
+In order to gain some knowledge about the data that we are wanting to analyse, we'll perform some basic exploration steps?
+
+```{r, echo = TRUE}
+dim(train)
+dim(test)
+```
+
+
+The two dataset are composed of:
+-The training set consists of 19622 observations of 160 variables
+-The testing set consists of 20 observations of 160 variables
+
+We also notice that many columns are mostly filled with NA (NA is composed from the empty, NA and div/0 values in the raw dataset). Moreover the 7 first columns do not seem to have any value in the analysis. In order to perform the next steps, we'll get rid of those columns so that the analysis will be done on a clean data set.
+
+```{r, echo = TRUE}
+NA_Count = sapply(1:dim(train)[2],function(x)sum(is.na(train[,x])))
+
+#The columns where more than 50% of the values are NA are suppressed from the dataset
+NA_list = which(NA_Count/19622>0.5)
+
+#The first seven columns are meaningless in the scope of our study
+colnames(train[,c(1:7)])
+
+train = train[,-NA_list]
+train = train[,-c(1:7)]
+train$classe = factor(train$classe)
+```
+
+We also do not want to keep in our dataset the predictors that have zero variance. 
+
+```{r, echo = TRUE}
+ColumnsZVar <- nearZeroVar(train, saveMetrics = TRUE)
+train <- train[, ColumnsZVar$nzv==FALSE]
+train$classe = factor(train$classe)
+```
+
+By performing the previous steps, the dataset on which the analysis will be performed is now ready. 
+
+#Partitioning the training data set to allow cross-validation
+
+In order to evaluation the models that we are going to test in order to predict the manner in which the exercise was done, the provided trainset is split into 2 new subsets (60% of the train set will be used to train the different models and 40% will be used to evaluate their respective performance)
+
+```{r, echo = TRUE}
+set.seed(1234)
+subTrain <- createDataPartition(y=train$classe, p=.6, list=FALSE)
+
+training <- train[subTrain, ]
+testing <- train[-subTrain, ]
+```
+
+#Model Training
+
+We are facing a classification problem. We want to predict in which of the 5 categories (A, B, C, D, E) fall the data in the test set. As a consequence, we'll test three models from the R caret package that can predict the outcomes for a classification problem (decision tree and random forest). 
+
+In order to perform cross-validation, first we set up the trainControl parameters. 
+
+```{r, echo = TRUE}
+cv3 = trainControl(method="cv",number=3,allowParallel=TRUE,verboseIter=TRUE)
+```
+
+The first model, we'll try is a decision tree. Based on its caracteristics, we do not expect this model to have the best performances. 
+
+```{r, echo = TRUE}
+modrpart = train(classe~., data=training, method="rpart",trControl=cv3)
+confusionMatrix(testing$classe, predict(modrpart,testing))
+```
+As expected, the performance of this model is average. 
+- Accuracy : 0.4904          
+- 95% CI : (0.4793, 0.5016)
+- Kappa: 0.339
+
+In order to have a better prediction model, we'll train a Random Forest Classifier, which is one of the most accurate model available. However, it will be much slower to train it.  
+
+```{r, echo = TRUE}
+modrf = train(classe~., data=training, method="rf",trControl=cv3, prox = TRUE)
+confusionMatrix(testing$classe, predict(modrf,testing))
+```
+
+The performance of the random forest is way better than the decision tree:
+- Accuracy : 0.9908          
+- 95% CI : (0.9885, 0.9928)
+- Kappa : 0.9884          
+  
+
+As a consequence, we'll use this model to predict the manner in which the exercise were done
+
+
+#Prediction
+
+We'll use the script provided by Coursera in order to generate the answer to the project. 
+
+```{r, echo = TRUE}
+answers=predict(modrf,test)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+answers
+
+pml_write_files(answers)
+```
+
+In conclusion, the 20 recording for which we were trying to predict the class are respectively:
+B A B A A E D B A A B C B A E E A B B B
